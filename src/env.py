@@ -188,22 +188,36 @@ class AshtaChammaEnv(gym.Env):
 
     def render(self):
         observation = self.observation
+
+        # print top line
         print("-" * 31)
         state = np.vstack((observation[PLAYER_ONE], observation[PLAYER_TWO]))
+
         for row1, row2 in zip(state, state[int(len(state)/2):]):
+            # print bar before each square
             print("| ", end="")
+
+            # print player one piece count
             for square_1 in row1:
                 if square_1 != 0:
                     print(PLAYER_ONE, square_1, "| ", end="")
                 else:
                     print("    | ", end="")
+
+            # separate player one and player two piece count
             print()
+
+            # print bar after each square
             print("| ", end="")
+
+            # print player two piece count
             for square_2 in row2:
                 if square_2 != 0:
                     print(PLAYER_TWO, square_2, "| ", end="")
                 else:
                     print("    | ", end="")
+            
+            # print bottom line after each row
             print()
             print("-------------------------------")
     
