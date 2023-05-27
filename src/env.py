@@ -10,70 +10,64 @@ PLAYER_TWO = "X"
 
 # define move paths for each player in the 5x5 array
 MOVE_PATH = {
-    PLAYER_ONE: np.array(
-        [
-            [4, 2],
-            [4, 3],
-            [4, 4],
-            [3, 4],
-            [2, 4],
-            [1, 4],
-            [0, 4],
-            [0, 3],
-            [0, 2],
-            [0, 1],
-            [0, 0],
-            [1, 0],
-            [2, 0],
-            [3, 0],
-            [4, 0],
-            [4, 1],
-            [3, 1],
-            [2, 1],
-            [1, 1],
-            [1, 2],
-            [1, 3],
-            [2, 3],
-            [3, 3],
-            [3, 2],
-            [2, 2],
-        ]
-    ),
-    PLAYER_TWO: np.array(
-        [
-            [0, 2],
-            [0, 1],
-            [0, 0],
-            [1, 0],
-            [2, 0],
-            [3, 0],
-            [4, 0],
-            [4, 1],
-            [4, 2],
-            [4, 3],
-            [4, 4],
-            [3, 4],
-            [2, 4],
-            [1, 4],
-            [0, 4],
-            [0, 3],
-            [1, 3],
-            [2, 3],
-            [3, 3],
-            [3, 2],
-            [3, 1],
-            [2, 1],
-            [1, 1],
-            [1, 2],
-            [2, 2],
-        ]
-    ),
+    PLAYER_ONE: [
+        (4, 2),
+        (4, 3),
+        (4, 4),
+        (3, 4),
+        (2, 4),
+        (1, 4),
+        (0, 4),
+        (0, 3),
+        (0, 2),
+        (0, 1),
+        (0, 0),
+        (1, 0),
+        (2, 0),
+        (3, 0),
+        (4, 0),
+        (4, 1),
+        (3, 1),
+        (2, 1),
+        (1, 1),
+        (1, 2),
+        (1, 3),
+        (2, 3),
+        (3, 3),
+        (3, 2),
+        (2, 2),
+    ],
+    PLAYER_TWO: [
+        (0, 2),
+        (0, 1),
+        (0, 0),
+        (1, 0),
+        (2, 0),
+        (3, 0),
+        (4, 0),
+        (4, 1),
+        (4, 2),
+        (4, 3),
+        (4, 4),
+        (3, 4),
+        (2, 4),
+        (1, 4),
+        (0, 4),
+        (0, 3),
+        (1, 3),
+        (2, 3),
+        (3, 3),
+        (3, 2),
+        (3, 1),
+        (2, 1),
+        (1, 1),
+        (1, 2),
+        (2, 2),
+    ]
 }
 
 # array containing safe squares
-SAFE_SQUARES = np.array(
-    [[0, 2], [1, 1], [1, 3], [2, 0], [2, 2], [2, 4], [3, 1], [3, 3], [4, 2]]
-)
+SAFE_SQUARES = [(0, 2), (1, 1), (1, 3), (2, 0), (2, 2), (2, 4), (3, 1), (3, 3), (4, 2)]
 
 # distances of possible moves
 MOVES = [1, 2, 3, 4, 8]
@@ -92,14 +86,14 @@ class AshtaChammaEnv(gym.Env):
 
         # can choose which piece to move at each turn
         self.action_space = spaces.Tuple(
-            spaces.Discrete(NUM_PIECES), spaces.Discrete(len(MOVES))
+            (spaces.Discrete(NUM_PIECES), spaces.Discrete(len(MOVES)))
         )
 
     def reset(self):
         # clean board to default
-        self.observation = {PLAYER_ONE: np.zeros((5, 5)), PLAYER_TWO: np.zeros((5, 5))}
+        self.observation = {PLAYER_ONE: np.zeros((5, 5), dtype=int), PLAYER_TWO: np.zeros((5, 5), dtype=int)}
         self.observation[PLAYER_ONE][4, 2] = NUM_PIECES
-        self.observation[PLAYER_ONE][0, 2] = NUM_PIECES
+        self.observation[PLAYER_TWO][0, 2] = NUM_PIECES
 
         # reset player
         self.player = PLAYER_ONE
@@ -116,6 +110,9 @@ class AshtaChammaEnv(gym.Env):
         # unpack piece number and number of spaces to move
         piece_number, number_moves = action
 
+        # figure out how many spaces to move
+        number_moves = MOVES[number_moves]
+
         # get piece position indices
         piece_pos_indices = self._get_piece_pos_indices()
 
@@ -124,7 +121,7 @@ class AshtaChammaEnv(gym.Env):
 
         # if move is out of bounds, don't change the board
         if curr_pos_idx + number_moves >= 25:
-            return (self.observation, 0, self.done, self._other_player())
+            return self.observation, 0, False
 
         # get current position and position to move
         curr_pos = pos_array[curr_pos_idx]
@@ -136,8 +133,7 @@ class AshtaChammaEnv(gym.Env):
                 return (
                     self.observation,
                     0,
-                    self.done,
-                    self._other_player(),
+                    False,
                 )
 
             # capture the opponent's piece, if relevant
@@ -157,10 +153,9 @@ class AshtaChammaEnv(gym.Env):
                 self.observation,
                 self._get_reward(self.player),
                 True,
-                self._other_player(),
             )
         else:
-            return self.observation, 0, True, self._other_player()
+            return self.observation, 0, True
 
     def _other_player(self):
         # get other player symbol
@@ -175,7 +170,7 @@ class AshtaChammaEnv(gym.Env):
 
         # get piece positions of current player in order of how far along they are
         # (from nearest to farthest)
-        for pos_idx in range(pos_array.shape[0]):
+        for pos_idx, _ in enumerate(pos_array):
             pieces_here = self.observation[self.player][pos_array[pos_idx]]
             while pieces_here > 0:
                 piece_indices.append(pos_idx)
@@ -202,12 +197,15 @@ class AshtaChammaEnv(gym.Env):
                     print(PLAYER_ONE, square_1, "| ", end="")
                 else:
                     print("    | ", end="")
-                print()
-                print("| ", end="")
-                for square_2 in row2:
-                    if square_2 != 0:
-                        print(PLAYER_TWO, square_2, "| ", end="")
-                    else:
-                        print("    | ", end="")
-                print()
-                print("-------------------------------")
+            print()
+            print("| ", end="")
+            for square_2 in row2:
+                if square_2 != 0:
+                    print(PLAYER_TWO, square_2, "| ", end="")
+                else:
+                    print("    | ", end="")
+            print()
+            print("-------------------------------")
+    
+    def switch_player(self):
+        self.player = self._other_player()
