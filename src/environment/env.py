@@ -90,6 +90,10 @@ class AshtaChammaEnv(gym.Env):
         )
 
     def reset(self):
+        """
+        resets board to its default state after each episode
+        """
+
         # clean board to default
         self.observation = {PLAYER_ONE: np.zeros((5, 5), dtype=int), PLAYER_TWO: np.zeros((5, 5), dtype=int)}
         self.observation[PLAYER_ONE][4, 2] = NUM_PIECES
@@ -101,6 +105,23 @@ class AshtaChammaEnv(gym.Env):
         return self.observation, self.player
 
     def step(self, action: np.ndarray):
+        """
+        handles one step given an action
+        inputs: action - tuple (piece no. in order, move id)
+            --> number of moves for move id:
+                    0: 1,
+                    1: 2,
+                    2: 3,
+                    3: 4,
+                    4: 8
+        outputs: observation - dict of ndarrays representing board,
+                 reward - +1 if P1 wins, -1 if P2 wins, 0 otherwise,
+                 done - boolean representing the win condition
+
+        notes:
+         - does nothing if player tries to move onto own piece
+        """
+
         # ensure that action is valid
         assert self.action_space.contains(action)
 
@@ -114,13 +135,14 @@ class AshtaChammaEnv(gym.Env):
         number_moves = MOVES[number_moves]
 
         # get piece position indices
-        piece_pos_indices = self._get_piece_pos_indices()
+        piece_pos_indices = self.__get_piece_pos_indices()
 
         # get current position index
         curr_pos_idx = piece_pos_indices[piece_number]
 
         # if move is out of bounds, don't change the board
         if curr_pos_idx + number_moves >= 25:
+            self.__switch_player()
             return self.observation, 0, False
 
         # get current position and position to move
@@ -137,10 +159,10 @@ class AshtaChammaEnv(gym.Env):
                 )
 
             # capture the opponent's piece, if relevant
-            elif self.observation[self._other_player()][pos_to_move] > 0:
-                self.observation[self._other_player()][pos_to_move] -= 1
-                self.observation[self._other_player()][
-                    MOVE_PATH[self._other_player()][0]
+            elif self.observation[self.__other_player()][pos_to_move] > 0:
+                self.observation[self.__other_player()][pos_to_move] -= 1
+                self.observation[self.__other_player()][
+                    MOVE_PATH[self.__other_player()][0]
                 ] += 1
 
         # move piece to correct spot
@@ -151,20 +173,21 @@ class AshtaChammaEnv(gym.Env):
         if self.observation[self.player][2, 2] == NUM_PIECES:
             return (
                 self.observation,
-                self._get_reward(self.player),
+                self.__get_reward(self.player),
                 True,
             )
         else:
-            return self.observation, 0, True
+            self.__switch_player()
+            return self.observation, 0, False
 
-    def _other_player(self):
+    def __other_player(self):
         # get other player symbol
         if self.player == PLAYER_ONE:
             return PLAYER_TWO
         else:
             return PLAYER_ONE
 
-    def _get_piece_pos_indices(self):
+    def __get_piece_pos_indices(self):
         piece_indices = []
         pos_array = MOVE_PATH[self.player]
 
@@ -179,7 +202,7 @@ class AshtaChammaEnv(gym.Env):
         return piece_indices
 
     @staticmethod
-    def _get_reward(player):
+    def __get_reward(player):
         # map player symbol to their reward, if they win
         if player == PLAYER_ONE:
             return 1
@@ -187,6 +210,9 @@ class AshtaChammaEnv(gym.Env):
             return -1
 
     def render(self):
+        """
+        renders the board onto the console
+        """
         observation = self.observation
 
         # print top line
@@ -221,5 +247,5 @@ class AshtaChammaEnv(gym.Env):
             print()
             print("-------------------------------")
     
-    def switch_player(self):
-        self.player = self._other_player()
+    def __switch_player(self):
+        self.player = self.__other_player()
