@@ -126,7 +126,22 @@ class AshtaChammaEnv(gym.Env):
 
         # ensure that action is valid
         assert self.action_space.contains(action)
-
+        
+        # check whether there are no legal moves for the cpu and pass
+        legal_moves = [x for x in range(4) if not self.is_illegal_move(x)]
+        if not legal_moves:
+            if player_move:
+                self.__switch_player()
+                self.__shells.roll()
+                self.observation[self.ROLL] = self.__shells.state
+                observation, reward, done = self.step(self.opponent_policy(self), player_move=False)
+                self.__switch_player()
+                self.__shells.roll()
+                observation[self.ROLL] = self.__shells.state
+                return observation, reward, done
+            else:
+                return self.observation, 0, False
+        
         # get position array
         pos_array = self.MOVE_PATH[self.player]
 
