@@ -1,43 +1,13 @@
 from env import AshtaChammaEnv
+from policies.random_policy import random_policy
 
 if __name__ == "__main__":
-    env = AshtaChammaEnv()
+
+    env = AshtaChammaEnv(opponent_policy=random_policy)
 
     # test capture
-    env.reset()
-    env.step((1, 2))
-    env.step((2, 4))
-    env.step((1, 2))
-    env.step((3, 2))
+    print(env.reset())
+    print(env.step(1))
     env.render()
-
-    # test win condition
-    env.reset()
-    env.step((0, 4))
-    env.step((0, 4))
-    env.step((0, 4))
-    env.step((0, 4))
-    env.step((0, 4))
-    env.step((0, 4))
-    env.step((0, 4))
-    env.step((0, 4))
-
-    env.step((0, 4))
-    env.step((0, 4))
-    env.step((0, 4))
-    env.step((0, 4))
-    env.step((0, 4))
-    env.step((0, 4))
-    env.step((0, 4))
-    env.step((0, 4))
-
-    env.step((0, 4))
-    env.step((0, 4))
-    env.step((0, 4))
-    env.step((0, 4))
-    _, reward, done = env.step((0, 4))
-    print(reward, done) # should print "0 False"
-    env.step((0, 4))
-    _, reward, done = env.step((0, 4))
-    print(reward, done) # should print "1 True"
+    print(env.step(0))
     env.render()
