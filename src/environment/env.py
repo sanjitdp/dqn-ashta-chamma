@@ -167,6 +167,10 @@ class AshtaChammaEnv(gym.Env):
                 self.observation[self.ROLL] = self.__shells.state
                 return self.observation, 0, False
             else:
+                if self.observation[self.player][2, 2] == self.NUM_PIECES:
+                    self.observation[self.player][curr_pos] += 1
+                    self.observation[self.player][pos_to_move] -= 1
+                    return self.observation, 0, False
                 self.__shells.roll()
                 self.observation[self.ROLL] = self.__shells.state
                 return self.step(self.opponent_policy(self), player_move=False)
