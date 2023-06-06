@@ -161,3 +161,6 @@ cython_debug/
 
 # VS Code preference files
 .vscode/
+
+# Remove MacOS files
+.DS_Store

@@ -165,18 +165,20 @@ class AshtaChammaEnv(gym.Env):
         curr_pos = pos_array[curr_pos_idx]
         pos_to_move = pos_array[curr_pos_idx + number_moves]
 
+        capture = False
         if pos_to_move not in self.SAFE_SQUARES and self.observation[self.__other_player()][pos_to_move] > 0:
             self.observation[self.__other_player()][pos_to_move] -= 1
             self.observation[self.__other_player()][
                 self.MOVE_PATH[self.__other_player()][0]
             ] += 1
+            capture = True
 
         # move piece to correct spot
         self.observation[self.player][curr_pos] -= 1
         self.observation[self.player][pos_to_move] += 1
 
-        # you must re-roll on 4 or 8
-        if number_moves in {4, 8}:
+        # you must re-roll on 4 or 8 or capture
+        if number_moves in {4, 8} or capture:
             if player_move:
                 self.__shells.roll()
                 self.observation[self.ROLL] = self.__shells.state
@@ -208,7 +210,7 @@ class AshtaChammaEnv(gym.Env):
                 self.__shells.roll()
                 observation[self.ROLL] = self.__shells.state
                 return observation, reward, done
-            # otherwise, the game isn't over so 
+            # otherwise, the game isn't over so continue
             else:
                 return self.observation, 0, False
 

@@ -17,6 +17,8 @@ import torch.nn as nn
 import torch.optim as optim
 import torch.nn.functional as F
 
+from tqdm import tqdm
+
 opponent_policy = random_policy
 env = AshtaChammaEnv(opponent_policy)
 
@@ -28,7 +30,8 @@ if is_ipython:
 plt.ion()
 
 # if GPU is to be used
-device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+device = torch.device("mps" if torch.backends.mps.is_available() else "cpu")
+# device = torch.device("cpu")
 
 Transition = namedtuple('Transition',
                         ('state', 'action', 'next_state', 'reward'))
@@ -58,11 +61,11 @@ class ReplayMemory(object):
 # LR is the learning rate of the ``AdamW`` optimizer
 BATCH_SIZE = 128
 GAMMA = 0.99
-EPS_START = 0.9
+EPS_START = 0.95
 EPS_END = 0.05
-EPS_DECAY = 1000
+EPS_DECAY = 500
 TAU = 0.005
-LR = 1e-4
+LR = 5e-5
 
 # Get number of actions from gym action space
 n_actions = env.action_space.n
@@ -91,13 +94,20 @@ def select_action(state):
         with torch.no_grad():
             output = policy_net(state)
             # get rid of illegal moves...
-            penalty = torch.zeros(n_actions)
+            penalty = torch.zeros(n_actions, device=device)
             for i in range(n_actions):
                 if env.is_illegal_move(i):
                     penalty[i] -= np.inf
-            return (output + penalty).max(1)[1].view(1, 1) # t.max(1) will return the largest column value of each row. Second column on max result is index of where max element was found, so we pick action with the larger expected reward.
+            move = (output + penalty).max(1)[1].view(1, 1) # t.max(1) will return the largest column value of each row. Second column on max result is index of where max element was found, so we pick action with the larger expected reward.
+            if move.item() == -1:
+                move = torch.tensor([[env.action_space.sample()]], device=device, dtype=torch.long)
     else:
-        return torch.tensor([[env.action_space.sample()]], device=device, dtype=torch.long)
+        try:
+            move = torch.tensor([random.choice([i for i in range(n_actions) if not env.is_illegal_move(i)])], device=device, dtype=torch.long)
+        except:
+            move = torch.tensor([[env.action_space.sample()]], device=device, dtype=torch.long)
+    
+    return move
 
 episode_durations = []
 
@@ -161,13 +171,10 @@ def optimize_model():
     # Maybe add on a clipping for output, this is sometimes done, could be sus though
     optimizer.step()
 
-if torch.cuda.is_available():
-    num_episodes = 600
-else:
-    num_episodes = 100
+num_episodes = 10000
 
 reward_count = np.zeros(num_episodes)
-for i_episode in range(num_episodes):
+for i_episode in tqdm(range(num_episodes)):
     # Initialize the environment and get it's state
     state, info = env.reset()
     state_np = np.concatenate((state[env.PLAYER_ONE], state[env.PLAYER_TWO], state[env.ROLL]), axis=None)
@@ -208,15 +215,37 @@ for i_episode in range(num_episodes):
             #plot_durations()
             break
 
-def plot_win_rate():
-    plt.plot(np.arange(num_episodes), reward_count)
+def plot_windowed_average():
+    avg_rewards = []
+    for idx in range(5, len(reward_count)):
+        avg_rewards.append(sum(reward_count[idx-5:idx]) / 5)
+    plt.plot(range(5, len(reward_count)), avg_rewards)
     plt.xlabel("Episodes")
     plt.ylabel("Reward")
-    plt.title("Episodes vs. average reward (learning rules)")
+    plt.title("Five-episode average reward (legal moves)")
+    plt.show()
+
+def plot_win_rate():
+    win_count = [(reward + 1) / 2 for reward in reward_count]
+
+    win_rates = []
+    running_sum = 0
+    for idx, win in enumerate(win_count):
+        running_sum += win
+        win_rates.append(running_sum / (idx + 1))
+
+    plt.plot(range(len(reward_count)), win_rates)
+    plt.xlabel("Episodes")
+    plt.ylabel("Win rate")
+    plt.title("Episodes vs. win rate (legal moves)")
+    plt.axhline(y = 0.5, color = 'black', linestyle = 'dashed')
+
+    print("Final win rate:", win_rates[-1])
+
     plt.show()
 
 print('Complete')
-#plot_durations()
+#plot_windowed_average()
 plot_win_rate()
 plt.ioff()
 plt.show()
