@@ -5,6 +5,10 @@ from gymnasium import spaces
 
 
 class AshtaChammaEnv(gym.Env):
+    """
+    subclasses the gymnasium environment to create the game environment
+    """
+
     # set relevant constants
     NUM_PIECES = 4
     PLAYER_ONE = "O"
@@ -66,11 +70,21 @@ class AshtaChammaEnv(gym.Env):
             (1, 1),
             (1, 2),
             (2, 2),
-        ]
+        ],
     }
 
     # array containing safe squares
-    SAFE_SQUARES = [(0, 2), (1, 1), (1, 3), (2, 0), (2, 2), (2, 4), (3, 1), (3, 3), (4, 2)]
+    SAFE_SQUARES = [
+        (0, 2),
+        (1, 1),
+        (1, 3),
+        (2, 0),
+        (2, 2),
+        (2, 4),
+        (3, 1),
+        (3, 3),
+        (4, 2),
+    ]
 
     # distances of possible self.MOVES
     MOVES = [1, 2, 3, 4, 8]
@@ -82,7 +96,7 @@ class AshtaChammaEnv(gym.Env):
             {
                 self.PLAYER_ONE: spaces.Box(low=0, high=self.NUM_PIECES, shape=(5, 5)),
                 self.PLAYER_TWO: spaces.Box(low=0, high=self.NUM_PIECES, shape=(5, 5)),
-                self.ROLL: spaces.Discrete(len(self.MOVES))
+                self.ROLL: spaces.Discrete(len(self.MOVES)),
             }
         )
 
@@ -102,7 +116,10 @@ class AshtaChammaEnv(gym.Env):
         self.__shells.roll()
 
         # clean board to default
-        self.observation = {self.PLAYER_ONE: np.zeros((5, 5), dtype=int), self.PLAYER_TWO: np.zeros((5, 5), dtype=int)}
+        self.observation = {
+            self.PLAYER_ONE: np.zeros((5, 5), dtype=int),
+            self.PLAYER_TWO: np.zeros((5, 5), dtype=int),
+        }
         self.observation[self.PLAYER_ONE][4, 2] = self.NUM_PIECES
         self.observation[self.PLAYER_TWO][0, 2] = self.NUM_PIECES
         self.observation[self.ROLL] = self.__shells.state
@@ -126,7 +143,7 @@ class AshtaChammaEnv(gym.Env):
 
         # ensure that action is valid
         assert self.action_space.contains(action)
-        
+
         # check whether there are no legal moves for the cpu and pass
         legal_moves = [x for x in range(4) if not self.is_illegal_move(x)]
         if not legal_moves:
@@ -134,14 +151,16 @@ class AshtaChammaEnv(gym.Env):
                 self.__switch_player()
                 self.__shells.roll()
                 self.observation[self.ROLL] = self.__shells.state
-                observation, reward, done = self.step(self.opponent_policy(self), player_move=False)
+                observation, reward, done = self.step(
+                    self.opponent_policy(self), player_move=False
+                )
                 self.__switch_player()
                 self.__shells.roll()
                 observation[self.ROLL] = self.__shells.state
                 return observation, reward, done
             else:
                 return self.observation, 0, False
-        
+
         # get position array
         pos_array = self.MOVE_PATH[self.player]
 
@@ -166,7 +185,10 @@ class AshtaChammaEnv(gym.Env):
         pos_to_move = pos_array[curr_pos_idx + number_moves]
 
         capture = False
-        if pos_to_move not in self.SAFE_SQUARES and self.observation[self.__other_player()][pos_to_move] > 0:
+        if (
+            pos_to_move not in self.SAFE_SQUARES
+            and self.observation[self.__other_player()][pos_to_move] > 0
+        ):
             self.observation[self.__other_player()][pos_to_move] -= 1
             self.observation[self.__other_player()][
                 self.MOVE_PATH[self.__other_player()][0]
@@ -205,7 +227,9 @@ class AshtaChammaEnv(gym.Env):
                 self.__switch_player()
                 self.__shells.roll()
                 self.observation[self.ROLL] = self.__shells.state
-                observation, reward, done = self.step(self.opponent_policy(self), player_move=False)
+                observation, reward, done = self.step(
+                    self.opponent_policy(self), player_move=False
+                )
                 self.__switch_player()
                 self.__shells.roll()
                 observation[self.ROLL] = self.__shells.state
@@ -220,7 +244,7 @@ class AshtaChammaEnv(gym.Env):
             return self.PLAYER_TWO
         else:
             return self.PLAYER_ONE
-    
+
     def __get_piece_pos_indices(self):
         piece_indices = []
         pos_array = self.MOVE_PATH[self.player]
@@ -234,8 +258,12 @@ class AshtaChammaEnv(gym.Env):
                 pieces_here -= 1
 
         return piece_indices
-    
+
     def is_illegal_move(self, piece_number):
+        """
+        checks whether a move is illegal
+        """
+
         # get piece position indices
         piece_pos_indices = self.__get_piece_pos_indices()
 
@@ -250,7 +278,53 @@ class AshtaChammaEnv(gym.Env):
             return True
         else:
             pos_to_move = self.MOVE_PATH[self.player][curr_pos_idx + number_moves]
-            return pos_to_move not in self.SAFE_SQUARES and self.observation[self.player][pos_to_move] > 0
+            return (
+                pos_to_move not in self.SAFE_SQUARES
+                and self.observation[self.player][pos_to_move] > 0
+            )
+
+    def moving_to_safe(self, piece_number):
+        """
+        checks whether a move will land on a safe square
+        """
+
+        # get piece position indices
+        piece_pos_indices = self.__get_piece_pos_indices()
+
+        # get current position index
+        curr_pos_idx = piece_pos_indices[piece_number]
+
+        # compute number of moves
+        number_moves = self.MOVES[self.observation[self.ROLL]]
+
+        # compute position we're moving to
+        pos_to_move = self.MOVE_PATH[self.player][curr_pos_idx + number_moves]
+
+        # check if we're moving onto a safe square
+        return pos_to_move in self.SAFE_SQUARES
+
+    def is_capture_move(self, piece_number):
+        """
+        checks whether a move will capture a piece
+        """
+
+        # get piece position indices
+        piece_pos_indices = self.__get_piece_pos_indices()
+
+        # get current position index
+        curr_pos_idx = piece_pos_indices[piece_number]
+
+        # compute number of moves
+        number_moves = self.MOVES[self.observation[self.ROLL]]
+
+        # compute position we're moving to
+        pos_to_move = self.MOVE_PATH[self.player][curr_pos_idx + number_moves]
+
+        # check if we're going to capture a piece
+        return (
+            pos_to_move not in self.SAFE_SQUARES
+            and self.observation[self.__other_player()][pos_to_move] > 0
+        )
 
     @staticmethod
     def __get_reward(player):
@@ -264,13 +338,14 @@ class AshtaChammaEnv(gym.Env):
         """
         renders the board onto the console
         """
+
         observation = self.observation
 
         # print top line
         print("-" * 31)
         state = np.vstack((observation[self.PLAYER_ONE], observation[self.PLAYER_TWO]))
 
-        for row1, row2 in zip(state, state[int(len(state)/2):]):
+        for row1, row2 in zip(state, state[int(len(state) / 2) :]):
             # print bar before each square
             print("| ", end="")
 
@@ -293,14 +368,21 @@ class AshtaChammaEnv(gym.Env):
                     print(self.PLAYER_TWO, square_2, "| ", end="")
                 else:
                     print("    | ", end="")
-            
+
             # print bottom line after each row
             print()
             print("-------------------------------")
-    
+
     def __switch_player(self):
         self.player = self.__other_player()
-    
+
     @staticmethod
     def to_array(state):
-        return np.vstack((state[AshtaChammaEnv.PLAYER_ONE], state[AshtaChammaEnv.PLAYER_TWO]))
+        return np.concatenate(
+            (
+                state[AshtaChammaEnv.PLAYER_ONE],
+                state[AshtaChammaEnv.PLAYER_TWO],
+                state[AshtaChammaEnv.ROLL],
+            ),
+            axis=None,
+        )
