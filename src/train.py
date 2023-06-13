@@ -138,8 +138,7 @@ def select_action(state, always_capture=False):
                             i
                             for i in range(n_actions)
                             if not env.is_illegal_move(i)
-                            and not always_capture
-                            or env.is_capture_move(i)
+                            and (not always_capture or env.is_capture_move(i))
                         ]
                     )
                 ],
