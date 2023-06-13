@@ -6,6 +6,7 @@ from random import random, choice
 import numpy as np
 import matplotlib.pyplot as plt
 from itertools import count
+import os
 
 # import helper objects
 from replay_memory import ReplayMemory, Transition
@@ -22,7 +23,6 @@ from policies.slow_policy import slow_policy
 import torch
 import torch.nn as nn
 import torch.optim as optim
-import torch.nn.functional as F
 
 # import tqdm for loading bars
 from tqdm import tqdm
@@ -46,7 +46,7 @@ device = torch.device("mps" if torch.backends.mps.is_available() else "cpu")
 # LR is the learning rate of the optimizer,
 # NUM_EPISODES is the number of episodes for training,
 # MEMORY_SIZE is the size of the replay memory
-BATCH_SIZE = 128
+BATCH_SIZE = 8
 GAMMA = 0.999
 EPS_START = 0.95
 EPS_END = 0.05
@@ -54,7 +54,11 @@ EPS_DECAY = 500
 TAU = 0.005
 LR = 5e-5
 NUM_EPISODES = 500
-MEMORY_SIZE = 10
+MEMORY_SIZE = 3
+LOAD_FROM_CHECKPOINT = True
+SAVE_CHECKPOINT = True
+LOAD_PATH = "./models/model-v2"
+SAVE_PATH = "./models/model-v3"
 
 # get number of actions from gym action space
 n_actions = env.action_space.n
@@ -68,10 +72,20 @@ n_observations = len(env.to_array(state))
 # set policy network and target network
 policy_net = DQN(n_observations, n_actions).to(device)
 target_net = DQN(n_observations, n_actions).to(device)
-target_net.load_state_dict(policy_net.state_dict())
 
 # set optimizer
 optimizer = optim.AdamW(policy_net.parameters(), lr=LR, amsgrad=True)
+
+# load from checkpoint if necessary
+if LOAD_FROM_CHECKPOINT:
+    # get training checkpoint
+    checkpoint = torch.load(LOAD_PATH)
+
+    policy_net.load_state_dict(checkpoint["model_state_dict"])
+    optimizer.load_state_dict(checkpoint["optimizer_state_dict"])
+
+# copy weights for target network
+target_net.load_state_dict(policy_net.state_dict())
 
 # initialize memory
 memory = ReplayMemory(MEMORY_SIZE)
@@ -83,7 +97,7 @@ steps_done = 0
 episode_durations = []
 
 
-def select_action(state, always_capture=False):
+def select_action(state, env, always_capture=False):
     """
     maps state to action, taking into account randomness (epsilon) and
     """
@@ -277,14 +291,52 @@ def plot_win_rate(reward_count):
     plt.show()
 
 
-if __name__ == "__main__":
+def validate():
+    with torch.no_grad():
+        rewards = []
+        for _ in range(100):
+            # initialize environment
+            env = AshtaChammaEnv(opponent_policy=random_policy)
+            observation, _ = env.reset()
+
+            # simulate a game, selecting an action at each step
+            done = False
+            while not done:
+                # env.render()
+                # print()
+
+                # convert observation to ndarray
+                observation_array = env.to_array(observation)
+
+                # tensorize the next state
+                observation = torch.tensor(
+                    observation_array, dtype=torch.float32, device=device
+                ).unsqueeze(0)
+
+                # compute new observation, reward, and whether the game is over
+                move = select_action(observation, env, always_capture=True).item()
+                observation, reward, done = env.step(move)
+
+            rewards.append(reward)
+
+        return sum(rewards) / len(rewards)
+
+
+def train():
     # keep track of rewards
     reward_count = np.zeros(NUM_EPISODES)
 
+    # keep track of validation win rate
+    # validation_rates = []
+
     # training loop
     for i_episode in tqdm(range(NUM_EPISODES)):
+        # compute average validation rate
+        # if i_episode % 10 == 0:
+        #     validation_rates.append(validate())
+
         # initialize the environment and get its state
-        state, info = env.reset()
+        state, _ = env.reset()
 
         # compute state array
         state_array = env.to_array(state)
@@ -297,7 +349,7 @@ if __name__ == "__main__":
         # training loop: equivalent to while True (with a counter t)
         for t in count():
             # compute action for current state
-            action = select_action(state, always_capture=True)
+            action = select_action(state, env, always_capture=True)
 
             # get observation and reward for making the computed action
             observation, reward, terminated = env.step(action.item())
@@ -345,8 +397,26 @@ if __name__ == "__main__":
                 episode_durations.append(t + 1)
                 break
 
+    if SAVE_CHECKPOINT:
+        # save model
+        torch.save(
+            {
+                "model_state_dict": policy_net.state_dict(),
+                "optimizer_state_dict": optimizer.state_dict(),
+            },
+            SAVE_PATH,
+        )
+
     # mark the end of training
     print("Done!")
 
     # create output plots
+    plt.figure()
     plot_win_rate(reward_count)
+    # plt.figure()
+    # plt.plot(validation_rates)
+    plt.show()
+
+
+if __name__ == "__main__":
+    train()
