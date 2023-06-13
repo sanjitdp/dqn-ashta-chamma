@@ -15,6 +15,8 @@ from policies.random_policy import random_policy
 from policies.safe_policy import safe_policy
 from policies.offense_policy import offense_policy
 from policies.smart_policy import smart_policy
+from policies.fast_policy import fast_policy
+from policies.slow_policy import slow_policy
 
 # import pytorch modules
 import torch
@@ -26,7 +28,7 @@ import torch.nn.functional as F
 from tqdm import tqdm
 
 # set opponent policy
-opponent_policy = offense_policy
+opponent_policy = smart_policy
 
 # initialize game environment
 env = AshtaChammaEnv(opponent_policy)
@@ -48,7 +50,7 @@ BATCH_SIZE = 128
 GAMMA = 0.999
 EPS_START = 0.95
 EPS_END = 0.05
-EPS_DECAY = 300
+EPS_DECAY = 500
 TAU = 0.005
 LR = 5e-5
 NUM_EPISODES = 500
@@ -253,7 +255,7 @@ def plot_win_rate(reward_count):
     """
 
     # associate reward to win count
-    win_count = [(reward + 1) / 2 for reward in reward_count]
+    win_count = [(reward + 1) / 2 if reward else 0 for reward in reward_count]
 
     # keep track of running win rates
     win_rates = []

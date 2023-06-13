@@ -2,6 +2,7 @@ import numpy as np
 import gymnasium as gym
 from util.shells import Shells
 from gymnasium import spaces
+from copy import deepcopy
 
 
 class AshtaChammaEnv(gym.Env):
@@ -14,6 +15,21 @@ class AshtaChammaEnv(gym.Env):
     PLAYER_ONE = "O"
     PLAYER_TWO = "X"
     ROLL = "ROLL"
+    PLAYER_ONE_CAPTURE = "OC"
+    PLAYER_TWO_CAPTURE = "XC"
+    REMEMBERED_STATE = "RS"
+    MULTI_TURN = "MT"
+
+    # save default remembered state
+    DEFAULT_REMEMBERED = {
+        "X": np.zeros((5, 5), dtype=int),
+        "O": np.zeros((5, 5), dtype=int),
+        "OC": 1,
+        "XC": 1,
+        "ROLL": 1,
+    }
+
+    REMEMBERED_ZERO_ARRAY = np.zeros(54)
 
     # define move paths for each player in the 5x5 array
     MOVE_PATH = {
@@ -91,12 +107,29 @@ class AshtaChammaEnv(gym.Env):
 
     def __init__(self, opponent_policy):
         # observation space consists of two BOARD_SIZE x BOARD_SIZE arrays, each between 0 and self.NUM_PIECES
-        # (one corresponding to self.PLAYER_ONE, one corresponding to self.PLAYER_TWO)
+        # (one corresponding to self.PLAYER_ONE, one corresponding to self.PLAYER_TWO),
+        # the current roll, and whether player one or player two has captured yet
         self.observation_space = spaces.Dict(
             {
                 self.PLAYER_ONE: spaces.Box(low=0, high=self.NUM_PIECES, shape=(5, 5)),
                 self.PLAYER_TWO: spaces.Box(low=0, high=self.NUM_PIECES, shape=(5, 5)),
                 self.ROLL: spaces.Discrete(len(self.MOVES)),
+                self.PLAYER_ONE_CAPTURE: spaces.Discrete(2),
+                self.PLAYER_TWO_CAPTURE: spaces.Discrete(2),
+                self.REMEMBERED_STATE: spaces.Dict(
+                    {
+                        self.PLAYER_ONE: spaces.Box(
+                            low=0, high=self.NUM_PIECES, shape=(5, 5)
+                        ),
+                        self.PLAYER_TWO: spaces.Box(
+                            low=0, high=self.NUM_PIECES, shape=(5, 5)
+                        ),
+                        self.ROLL: spaces.Discrete(len(self.MOVES)),
+                        self.PLAYER_ONE_CAPTURE: spaces.Discrete(2),
+                        self.PLAYER_TWO_CAPTURE: spaces.Discrete(2),
+                    }
+                ),
+                self.MULTI_TURN: spaces.Discrete(2),
             }
         )
 
@@ -122,12 +155,20 @@ class AshtaChammaEnv(gym.Env):
         }
         self.observation[self.PLAYER_ONE][4, 2] = self.NUM_PIECES
         self.observation[self.PLAYER_TWO][0, 2] = self.NUM_PIECES
+        self.observation[self.PLAYER_ONE_CAPTURE] = 1
+        self.observation[self.PLAYER_TWO_CAPTURE] = 1
         self.observation[self.ROLL] = self.__shells.state
+        self.__reset_remembered()
+        self.observation[self.MULTI_TURN] = 1
 
         # reset player
         self.player = self.PLAYER_ONE
 
         return self.observation, self.player
+
+    def __reset_remembered(self):
+        self.observation[self.MULTI_TURN] = 1
+        self.observation[self.REMEMBERED_STATE] = self.DEFAULT_REMEMBERED
 
     def step(self, action: np.ndarray, player_move=True):
         """
@@ -144,21 +185,49 @@ class AshtaChammaEnv(gym.Env):
         # ensure that action is valid
         assert self.action_space.contains(action)
 
-        # check whether there are no legal moves for the cpu and pass
+        # check whether neither player has any legal moves left,
+        # and draw the game if necessary
+        if (
+            self.observation[self.PLAYER_ONE_CAPTURE] == 1
+            and self.observation[self.PLAYER_TWO_CAPTURE] == 1
+        ):
+            if all(x > 8 for x in self.__get_piece_pos_indices()):
+                self.__switch_player()
+                if all(x > 8 for x in self.__get_piece_pos_indices()):
+                    return self.observation, 0, True
+                else:
+                    self.__switch_player()
+
+        # check whether there are no legal moves
         legal_moves = [x for x in range(4) if not self.is_illegal_move(x)]
         if not legal_moves:
+            # check if it was a multi-turn and then reset the board to the remembered state
+            if self.observation[self.MULTI_TURN] == 2:
+                self.observation = deepcopy(self.observation[self.REMEMBERED_STATE])
+                self.__reset_remembered()
+                self.__switch_player()
+                self.__shells.roll()
+                self.observation
+                return self.observation, 0, False
+
+            # if it's the player's turn, allow cpu to complete a move
             if player_move:
                 self.__switch_player()
                 self.__shells.roll()
                 self.observation[self.ROLL] = self.__shells.state
+                self.__reset_remembered()
                 observation, reward, done = self.step(
                     self.opponent_policy(self), player_move=False
                 )
                 self.__switch_player()
                 self.__shells.roll()
                 observation[self.ROLL] = self.__shells.state
+                self.__reset_remembered()
                 return observation, reward, done
+
+            # if it's the cpu's turn, relinquish control to player
             else:
+                self.__reset_remembered()
                 return self.observation, 0, False
 
         # get position array
@@ -184,16 +253,42 @@ class AshtaChammaEnv(gym.Env):
         curr_pos = pos_array[curr_pos_idx]
         pos_to_move = pos_array[curr_pos_idx + number_moves]
 
+        # capture a piece, if applicable
         capture = False
         if (
             pos_to_move not in self.SAFE_SQUARES
             and self.observation[self.__other_player()][pos_to_move] > 0
         ):
+            # remember current state in case we need to revert
+            if self.observation[self.MULTI_TURN] == 1:
+                remembered_state = deepcopy(self.observation)
+                del remembered_state[self.REMEMBERED_STATE]
+                del remembered_state[self.MULTI_TURN]
+                self.observation[self.REMEMBERED_STATE] = remembered_state
+                self.observation[self.MULTI_TURN] = 2
+            # send piece back to start
             self.observation[self.__other_player()][pos_to_move] -= 1
             self.observation[self.__other_player()][
                 self.MOVE_PATH[self.__other_player()][0]
             ] += 1
+
+            # set captured flag
+            match self.player:
+                case self.PLAYER_ONE:
+                    self.observation[self.PLAYER_ONE_CAPTURE] = 2
+                case self.PLAYER_TWO:
+                    self.observation[self.PLAYER_TWO_CAPTURE] = 2
+
             capture = True
+
+        if number_moves in {4, 8}:
+            # remember current state in case we need to revert
+            if self.observation[self.MULTI_TURN] == 1:
+                remembered_state = deepcopy(self.observation)
+                del remembered_state[self.REMEMBERED_STATE]
+                del remembered_state[self.MULTI_TURN]
+                self.observation[self.REMEMBERED_STATE] = remembered_state
+                self.observation[self.MULTI_TURN] = 2
 
         # move piece to correct spot
         self.observation[self.player][curr_pos] -= 1
@@ -206,13 +301,11 @@ class AshtaChammaEnv(gym.Env):
                 self.observation[self.ROLL] = self.__shells.state
                 return self.observation, 0, False
             else:
-                if self.observation[self.player][2, 2] == self.NUM_PIECES:
-                    self.observation[self.player][curr_pos] += 1
-                    self.observation[self.player][pos_to_move] -= 1
-                    return self.observation, 0, False
                 self.__shells.roll()
                 self.observation[self.ROLL] = self.__shells.state
-                return self.step(self.opponent_policy(self), player_move=False)
+                out = self.step(self.opponent_policy(self), player_move=False)
+                self.__reset_remembered()
+                return out
 
         # check for win condition (otherwise, return default values)
         if self.observation[self.player][2, 2] == self.NUM_PIECES:
@@ -224,6 +317,7 @@ class AshtaChammaEnv(gym.Env):
         else:
             # if it's the player's turn, roll + do an opponent move and roll again
             if player_move:
+                self.__reset_remembered()
                 self.__switch_player()
                 self.__shells.roll()
                 self.observation[self.ROLL] = self.__shells.state
@@ -236,6 +330,7 @@ class AshtaChammaEnv(gym.Env):
                 return observation, reward, done
             # otherwise, the game isn't over so continue
             else:
+                self.__reset_remembered()
                 return self.observation, 0, False
 
     def __other_player(self):
@@ -273,8 +368,16 @@ class AshtaChammaEnv(gym.Env):
         # compute number of moves
         number_moves = self.MOVES[self.observation[self.ROLL]]
 
+        # check whether player has captured
+        match self.player:
+            case self.PLAYER_ONE:
+                captured = self.observation[self.PLAYER_ONE_CAPTURE] == 2
+            case self.PLAYER_TWO:
+                captured = self.observation[self.PLAYER_TWO_CAPTURE] == 2
+
         # if move is out of bounds, end the game and punish the player
-        if curr_pos_idx + number_moves >= 25:
+        idx_to_move = curr_pos_idx + number_moves
+        if (not captured and idx_to_move > 12) or idx_to_move >= 25:
             return True
         else:
             pos_to_move = self.MOVE_PATH[self.player][curr_pos_idx + number_moves]
@@ -373,16 +476,43 @@ class AshtaChammaEnv(gym.Env):
             print()
             print("-------------------------------")
 
+        print("Roll:", self.MOVES[self.observation[self.ROLL]])
+
     def __switch_player(self):
         self.player = self.__other_player()
 
     @staticmethod
     def to_array(state):
-        return np.concatenate(
-            (
-                state[AshtaChammaEnv.PLAYER_ONE],
-                state[AshtaChammaEnv.PLAYER_TWO],
-                state[AshtaChammaEnv.ROLL],
-            ),
-            axis=None,
-        )
+        if state[AshtaChammaEnv.MULTI_TURN] == 2:
+            return np.concatenate(
+                (
+                    state[AshtaChammaEnv.PLAYER_ONE],
+                    state[AshtaChammaEnv.PLAYER_TWO],
+                    state[AshtaChammaEnv.PLAYER_ONE_CAPTURE],
+                    state[AshtaChammaEnv.PLAYER_TWO_CAPTURE],
+                    [state[AshtaChammaEnv.ROLL]] * 10,  # emphasize importance of roll
+                    state[AshtaChammaEnv.REMEMBERED_STATE][AshtaChammaEnv.PLAYER_ONE],
+                    state[AshtaChammaEnv.REMEMBERED_STATE][AshtaChammaEnv.PLAYER_TWO],
+                    state[AshtaChammaEnv.REMEMBERED_STATE][
+                        AshtaChammaEnv.PLAYER_ONE_CAPTURE
+                    ],
+                    state[AshtaChammaEnv.REMEMBERED_STATE][
+                        AshtaChammaEnv.PLAYER_TWO_CAPTURE
+                    ],
+                    state[AshtaChammaEnv.REMEMBERED_STATE][AshtaChammaEnv.ROLL],
+                    state[AshtaChammaEnv.MULTI_TURN],
+                ),
+                axis=None,
+            )
+        else:
+            return np.concatenate(
+                (
+                    state[AshtaChammaEnv.PLAYER_ONE],
+                    state[AshtaChammaEnv.PLAYER_TWO],
+                    state[AshtaChammaEnv.PLAYER_ONE_CAPTURE],
+                    state[AshtaChammaEnv.PLAYER_TWO_CAPTURE],
+                    [state[AshtaChammaEnv.ROLL]] * 10,  # emphasize importance of roll
+                    AshtaChammaEnv.REMEMBERED_ZERO_ARRAY,
+                ),
+                axis=None,
+            )
