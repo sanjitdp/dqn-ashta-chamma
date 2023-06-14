@@ -4,7 +4,7 @@ import numpy as np
 
 
 def model_policy(env):
-    LOAD_PATH = "./models/model-v3"
+    LOAD_PATH = "./models/model-v17"
     ALWAYS_CAPTURE = True
 
     n_actions = env.action_space.n
