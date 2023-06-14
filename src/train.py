@@ -29,13 +29,14 @@ import torch.optim as optim
 from tqdm import tqdm
 
 # set opponent policy
-opponent_policy = random_policy
+opponent_policy = smart_policy
 
 # initialize game environment
 env = AshtaChammaEnv(opponent_policy)
 
 # use metal performance shaders for acceleration if possible (apple silicon)
-device = torch.device("mps" if torch.backends.mps.is_available() else "cpu")
+# device = torch.device("mps" if torch.backends.mps.is_available() else "cpu")
+device = torch.device("cpu")
 
 # hyperparameters for the training loop:
 # BATCH_SIZE is the number of transitions sampled from the replay buffer,
@@ -47,20 +48,23 @@ device = torch.device("mps" if torch.backends.mps.is_available() else "cpu")
 # LR is the learning rate of the optimizer,
 # NUM_EPISODES is the number of episodes for training,
 # MEMORY_SIZE is the size of the replay memory
-BATCH_SIZE = 16
+BATCH_SIZE = 8
 GAMMA = 0.999
 EPS_START = 0.95
-EPS_END = 0.05
-EPS_DECAY = 300
+EPS_END = 0.01
+EPS_DECAY = 100
 TAU = 0.005
-LR = 5e-5
-NUM_EPISODES = 200
-MEMORY_SIZE = 64
+LR = 1e-5
+NUM_EPISODES = 1500
+MEMORY_SIZE = 2000
+ALWAYS_CAPTURE = True
+ALWAYS_SAFE = True
 LOAD_FROM_CHECKPOINT = True
 LOAD_OPTIMIZER = True
 SAVE_CHECKPOINT = True
-LOAD_PATH = "./models/model-v7"
-SAVE_PATH = "./models/model-v8"
+LOAD_PATH = "./models/model-v16"
+SAVE_PATH = "./models/model-v17"
+POLICY_NAME = "smart policy"
 
 # get number of actions from gym action space
 n_actions = env.action_space.n
@@ -132,13 +136,14 @@ def select_action(state, env, always_capture=False, always_safe=False):
                 if env.is_illegal_move(i):
                     penalty[i] -= np.inf
 
-                # if always_capture, penalize moves that don't lead to capture
-                elif always_capture and not env.is_capture_move(i):
-                    penalty[i] -= 7
+                if not env.is_illegal_move(i):
+                    # if always_capture, penalize moves that don't lead to capture
+                    if always_capture and not env.is_capture_move(i):
+                        penalty[i] -= 10000
 
-                # # if always_safe, penalize moves that don't land on a safe square
-                # elif always_safe and not env.moving_to_safe(i):
-                #     penalty[i] -= 5
+                    # if always_safe, penalize moves that don't land on a safe square
+                    if always_safe and not env.moving_to_safe(i):
+                        penalty[i] -= 5000
 
             # return move with the maximum expected reward
             move = (output + penalty).max(1)[1]
@@ -270,6 +275,9 @@ def plot_windowed_average(reward_count, window_size):
     plots windowed average win rate
     """
 
+    # compute win rate
+    reward_count = [(reward + 1) / 2 if reward else 0 for reward in reward_count]
+
     # keep track of average win rate in the last window_size episodes
     avg_rewards = []
     for idx in range(window_size, len(reward_count)):
@@ -277,9 +285,10 @@ def plot_windowed_average(reward_count, window_size):
 
     # plot windowed win rate
     plt.plot(range(window_size, len(reward_count)), avg_rewards)
+    plt.axhline(y=0.5, color="black", linestyle="dashed")
     plt.xlabel("Episodes")
     plt.ylabel("Reward")
-    plt.title("Five-episode average reward (legal moves)")
+    plt.title("Fifty-episode average reward (" + POLICY_NAME + ")")
 
     # show plot
     plt.show()
@@ -301,10 +310,10 @@ def plot_win_rate(reward_count):
         win_rates.append(running_sum / (idx + 1))
 
     # plot running win rates
-    plt.plot(range(len(reward_count)), win_rates)
+    plt.plot(range(len(reward_count) - 50), win_rates[50:])
     plt.xlabel("Episodes")
     plt.ylabel("Win rate")
-    plt.title("Episodes vs. win rate (legal moves)")
+    plt.title("Episodes vs. average win rate (" + POLICY_NAME + ")")
     plt.axhline(y=0.5, color="black", linestyle="dashed")
 
     # output final win rate
@@ -325,9 +334,6 @@ def validate():
             # simulate a game, selecting an action at each step
             done = False
             while not done:
-                # env.render()
-                # print()
-
                 # convert observation to ndarray
                 observation_array = env.to_array(observation)
 
@@ -338,7 +344,10 @@ def validate():
 
                 # compute new observation, reward, and whether the game is over
                 move = select_action(
-                    observation, env, always_capture=True, always_safe=True
+                    observation,
+                    env,
+                    always_capture=ALWAYS_CAPTURE,
+                    always_safe=ALWAYS_SAFE,
                 ).item()
                 observation, reward, done = env.step(move)
 
@@ -374,7 +383,9 @@ def train():
         # training loop: equivalent to while True (with a counter t)
         for t in count():
             # compute action for current state
-            action = select_action(state, env, always_capture=True, always_safe=True)
+            action = select_action(
+                state, env, always_capture=ALWAYS_CAPTURE, always_safe=ALWAYS_SAFE
+            )
 
             # get observation and reward for making the computed action
             observation, reward, terminated = env.step(action.item())
@@ -438,8 +449,8 @@ def train():
     # create output plots
     plt.figure()
     plot_win_rate(reward_count)
-    # plt.figure()
-    # plt.plot(validation_rates)
+    plt.figure()
+    plot_windowed_average(reward_count, 50)
     plt.show()
 
 
