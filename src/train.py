@@ -29,7 +29,7 @@ import torch.optim as optim
 from tqdm import tqdm
 
 # set opponent policy
-opponent_policy = offense_policy
+opponent_policy = random_policy
 
 # initialize game environment
 env = AshtaChammaEnv(opponent_policy)
@@ -54,13 +54,13 @@ EPS_END = 0.05
 EPS_DECAY = 300
 TAU = 0.005
 LR = 5e-5
-NUM_EPISODES = 500
+NUM_EPISODES = 200
 MEMORY_SIZE = 64
-LOAD_FROM_CHECKPOINT = False
+LOAD_FROM_CHECKPOINT = True
 LOAD_OPTIMIZER = True
 SAVE_CHECKPOINT = True
-LOAD_PATH = "./models/model-v6"
-SAVE_PATH = "./models/model-v7"
+LOAD_PATH = "./models/model-v7"
+SAVE_PATH = "./models/model-v8"
 
 # get number of actions from gym action space
 n_actions = env.action_space.n
@@ -141,7 +141,7 @@ def select_action(state, env, always_capture=False, always_safe=False):
                 #     penalty[i] -= 5
 
             # return move with the maximum expected reward
-            move = (output + penalty).max(1)[1].view(1, 1)
+            move = (output + penalty).max(1)[1]
 
             # if no best move was found (i.e., all moves are illegal), just make a random move
             if move.item() == -1:
@@ -236,7 +236,7 @@ def optimize():
 
     # compute Q(s_t, a) - the model computes Q(s_t), then we select
     # actions which would've been taken for each batch state according to policy_net
-    state_action_values = policy_net(state_batch).gather(1, action_batch)
+    state_action_values = policy_net(state_batch).gather(1, action_batch.unsqueeze(1))
 
     # expected values of actions for non_final_next_states are computed based on the "older" target_net
     next_state_values = torch.zeros(BATCH_SIZE, device=device)
