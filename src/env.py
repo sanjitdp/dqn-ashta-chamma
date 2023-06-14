@@ -169,6 +169,8 @@ class AshtaChammaEnv(gym.Env):
     def __reset_remembered(self):
         self.observation[self.MULTI_TURN] = 1
         self.observation[self.REMEMBERED_STATE] = self.DEFAULT_REMEMBERED
+        self.__shells.roll()
+        self.observation[self.ROLL] = self.__shells.state
 
     def step(self, action: np.ndarray, player_move=True):
         """
@@ -206,22 +208,16 @@ class AshtaChammaEnv(gym.Env):
                 self.observation = deepcopy(self.observation[self.REMEMBERED_STATE])
                 self.__reset_remembered()
                 self.__switch_player()
-                self.__shells.roll()
-                self.observation
                 return self.observation, 0, False
 
             # if it's the player's turn, allow cpu to complete a move
             if player_move:
                 self.__switch_player()
-                self.__shells.roll()
-                self.observation[self.ROLL] = self.__shells.state
                 self.__reset_remembered()
                 observation, reward, done = self.step(
                     self.opponent_policy(self), player_move=False
                 )
                 self.__switch_player()
-                self.__shells.roll()
-                observation[self.ROLL] = self.__shells.state
                 self.__reset_remembered()
                 return observation, reward, done
 

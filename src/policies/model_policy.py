@@ -2,11 +2,11 @@ import torch
 from dqn import DQN
 import numpy as np
 
-LOAD_PATH = "./models/model-v1"
-ALWAYS_CAPTURE = True
-
 
 def model_policy(env):
+    LOAD_PATH = "./models/model-v3"
+    ALWAYS_CAPTURE = True
+
     n_actions = env.action_space.n
     n_observations = len(env.to_array(env.observation))
     device = torch.device("mps" if torch.backends.mps.is_available() else "cpu")

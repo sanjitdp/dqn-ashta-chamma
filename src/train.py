@@ -18,6 +18,7 @@ from policies.offense_policy import offense_policy
 from policies.smart_policy import smart_policy
 from policies.fast_policy import fast_policy
 from policies.slow_policy import slow_policy
+from policies.model_policy import model_policy
 
 # import pytorch modules
 import torch
@@ -28,7 +29,7 @@ import torch.optim as optim
 from tqdm import tqdm
 
 # set opponent policy
-opponent_policy = smart_policy
+opponent_policy = offense_policy
 
 # initialize game environment
 env = AshtaChammaEnv(opponent_policy)
@@ -46,19 +47,20 @@ device = torch.device("mps" if torch.backends.mps.is_available() else "cpu")
 # LR is the learning rate of the optimizer,
 # NUM_EPISODES is the number of episodes for training,
 # MEMORY_SIZE is the size of the replay memory
-BATCH_SIZE = 8
+BATCH_SIZE = 16
 GAMMA = 0.999
 EPS_START = 0.95
 EPS_END = 0.05
-EPS_DECAY = 500
+EPS_DECAY = 300
 TAU = 0.005
 LR = 5e-5
 NUM_EPISODES = 500
-MEMORY_SIZE = 3
-LOAD_FROM_CHECKPOINT = True
+MEMORY_SIZE = 64
+LOAD_FROM_CHECKPOINT = False
+LOAD_OPTIMIZER = True
 SAVE_CHECKPOINT = True
-LOAD_PATH = "./models/model-v2"
-SAVE_PATH = "./models/model-v3"
+LOAD_PATH = "./models/model-v6"
+SAVE_PATH = "./models/model-v7"
 
 # get number of actions from gym action space
 n_actions = env.action_space.n
@@ -82,7 +84,9 @@ if LOAD_FROM_CHECKPOINT:
     checkpoint = torch.load(LOAD_PATH)
 
     policy_net.load_state_dict(checkpoint["model_state_dict"])
-    optimizer.load_state_dict(checkpoint["optimizer_state_dict"])
+
+    if LOAD_OPTIMIZER:
+        optimizer.load_state_dict(checkpoint["optimizer_state_dict"])
 
 # copy weights for target network
 target_net.load_state_dict(policy_net.state_dict())
@@ -97,7 +101,7 @@ steps_done = 0
 episode_durations = []
 
 
-def select_action(state, env, always_capture=False):
+def select_action(state, env, always_capture=False, always_safe=False):
     """
     maps state to action, taking into account randomness (epsilon) and
     """
@@ -130,7 +134,11 @@ def select_action(state, env, always_capture=False):
 
                 # if always_capture, penalize moves that don't lead to capture
                 elif always_capture and not env.is_capture_move(i):
-                    penalty[i] -= 5
+                    penalty[i] -= 7
+
+                # # if always_safe, penalize moves that don't land on a safe square
+                # elif always_safe and not env.moving_to_safe(i):
+                #     penalty[i] -= 5
 
             # return move with the maximum expected reward
             move = (output + penalty).max(1)[1].view(1, 1)
@@ -138,44 +146,59 @@ def select_action(state, env, always_capture=False):
             # if no best move was found (i.e., all moves are illegal), just make a random move
             if move.item() == -1:
                 move = torch.tensor(
-                    [[env.action_space.sample()]], device=device, dtype=torch.long
+                    [env.action_space.sample()], device=device, dtype=torch.long
                 )
 
     # otherwise, make a random move
     else:
-        try:
-            # try to make a random legal move (which captures if the always_capture flag is turned on)
+        # compute all capturing moves
+        capture_moves = [
+            i
+            for i in range(n_actions)
+            if not env.is_illegal_move(i) and env.is_capture_move(i)
+        ]
+
+        # compute all safe moves
+        safe_moves = [
+            i
+            for i in range(n_actions)
+            if not env.is_illegal_move(i) and env.moving_to_safe(i)
+        ]
+
+        # compute all legal moves
+        legal_moves = [i for i in range(n_actions) if not env.is_illegal_move(i)]
+
+        # if always_capture, try to make a capturing move
+        if always_capture and capture_moves:
             move = torch.tensor(
-                [
-                    choice(
-                        [
-                            i
-                            for i in range(n_actions)
-                            if not env.is_illegal_move(i)
-                            and (not always_capture or env.is_capture_move(i))
-                        ]
-                    )
-                ],
+                [choice(capture_moves)],
                 device=device,
                 dtype=torch.long,
             )
-        except:
-            try:
-                # if we can't make a capturing move, try to make any legal move
-                move = torch.tensor(
-                    [
-                        choice(
-                            [i for i in range(n_actions) if not env.is_illegal_move(i)]
-                        )
-                    ],
-                    device=device,
-                    dtype=torch.long,
-                )
-            except:
-                # if no legal moves, return a random move
-                move = torch.tensor(
-                    [[env.action_space.sample()]], device=device, dtype=torch.long
-                )
+
+        # if always_safe, try to make a safe move
+        elif always_safe and safe_moves:
+            move = torch.tensor(
+                [choice(safe_moves)],
+                device=device,
+                dtype=torch.long,
+            )
+
+        # try to make any legal move
+        elif legal_moves:
+            move = torch.tensor(
+                [choice(legal_moves)],
+                device=device,
+                dtype=torch.long,
+            )
+
+        # otherwise, it doesn't matter what move we make - the environment will handle it
+        else:
+            move = torch.tensor(
+                [0],
+                device=device,
+                dtype=torch.long,
+            )
 
     # return computed best move
     return move
@@ -296,7 +319,7 @@ def validate():
         rewards = []
         for _ in range(100):
             # initialize environment
-            env = AshtaChammaEnv(opponent_policy=random_policy)
+            env = AshtaChammaEnv(opponent_policy=opponent_policy)
             observation, _ = env.reset()
 
             # simulate a game, selecting an action at each step
@@ -314,7 +337,9 @@ def validate():
                 ).unsqueeze(0)
 
                 # compute new observation, reward, and whether the game is over
-                move = select_action(observation, env, always_capture=True).item()
+                move = select_action(
+                    observation, env, always_capture=True, always_safe=True
+                ).item()
                 observation, reward, done = env.step(move)
 
             rewards.append(reward)
@@ -349,7 +374,7 @@ def train():
         # training loop: equivalent to while True (with a counter t)
         for t in count():
             # compute action for current state
-            action = select_action(state, env, always_capture=True)
+            action = select_action(state, env, always_capture=True, always_safe=True)
 
             # get observation and reward for making the computed action
             observation, reward, terminated = env.step(action.item())
